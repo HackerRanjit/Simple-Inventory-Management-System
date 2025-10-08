@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simple Inventory Management System</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f4f6f8; margin:0; padding:24px; text-align:center; }
+    h1 { margin:0 0 6px; color:#222; }
+    p.subtitle { margin:0 0 18px; color:#444; }
+    .toolbar { margin:18px 0; }
+    button { background:#4b7bec; color:#fff; border:0; padding:8px 14px; margin:6px; border-radius:6px; cursor:pointer; font-size:14px; }
+    button:hover { opacity:.95; transform:translateY(-1px); }
+    #itemList { margin:18px auto 60px; width:90%; max-width:900px; text-align:left; }
+
+    table { width:100%; border-collapse:collapse; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,.06); border-radius:8px; overflow:hidden; }
+    th, td { padding:10px 12px; border-bottom:1px solid #eef2f6; }
+    th { background:#fbfcfe; text-align:left; color:#333; font-weight:600; }
+    tr:last-child td { border-bottom:0; }
+    .action-btn { padding:6px 10px; border-radius:6px; border:0; cursor:pointer; color:#fff; }
+    .edit { background:#2ecc71; }
+    .del { background:#e74c3c; margin-left:6px; }
+
+    /* modal */
+    .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); align-items:center; justify-content:center; z-index:999; }
+    .modal.show { display:flex; }
+    .modal-box { width:320px; background:#fff; padding:18px; border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.18); text-align:left; }
+    .modal-box h2 { margin:0 0 10px; font-size:18px; }
+    .modal-box label { display:block; font-size:13px; margin-top:8px; color:#333; }
+    .modal-box input { width:100%; padding:8px 10px; margin-top:6px; box-sizing:border-box; border:1px solid #dfe6ee; border-radius:6px; }
+    .modal-actions { margin-top:12px; display:flex; gap:8px; }
+    .btn-full { flex:1; padding:10px 12px; border:0; border-radius:6px; cursor:pointer; color:#fff; }
+    .save { background:#2ecc71; }
+    .cancel { background:#6c757d; }
+
+    .note { color:#666; font-size:13px; margin-top:12px; }
+  </style>
+</head>
+<body>
+
+  <h1>Simple Inventory Management System</h1>
+  <p class="subtitle">By Ranjit Shah (Roll No: 2312553)</p>
+  <hr>
+
+  <div class="toolbar">
+    <button onclick="onAddClick()">Add Item</button>
+    <button onclick="renderList()">View All Items</button>
+    <button onclick="onUpdateClick()">Update Item</button>
+    <button onclick="onDeleteClick()">Delete Item</button>
+    <button onclick="onSearchClick()">Search Item</button>
+  </div>
+
+  <div id="itemList"></div>
+
+  <!-- Modal -->
+  <div id="modal" class="modal" onclick="overlayClick(event)">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h2 id="modal-title">Add Item</h2>
+
+      <label for="name">Name</label>
+      <input id="name" type="text" placeholder="Item name">
+
+      <label for="qty">Quantity</label>
+      <input id="qty" type="number" min="0" placeholder="0">
+
+      <label for="price">Price ($)</label>
+      <input id="price" type="number" min="0" step="0.01" placeholder="0.00">
+
+      <div class="modal-actions">
+        <button class="btn-full save" onclick="onSave()">Save</button>
+        <button class="btn-full cancel" onclick="closeModal()">Cancel</button>
+      </div>
+
+      <p class="note" id="modal-note"></p>
+    </div>
+  </div>
+
+<script>
+  // ---------- data ----------
+  let items = JSON.parse(localStorage.getItem('inventory_items') || '[]');
+  let editingIndex = -1;
+
+  // ---------- utility ----------
+  function persist() {
+    localStorage.setItem('inventory_items', JSON.stringify(items));
+  }
+
+  // ---------- render ----------
+  function renderList(list = items) {
+    const container = document.getElementById('itemList');
+    if (!list || list.length === 0) {
+      container.innerHTML = '<p style="color:#555">No items in inventory. Click "Add Item" to create one.</p>';
+      return;
+    }
+
+    let html = '<table><thead><tr><th>Name</th><th style="width:110px">Quantity</th><th style="width:120px">Price ($)</th><th style="width:170px">Actions</th></tr></thead><tbody>';
+    list.forEach((it, idx) => {
+      // idx is index in provided list; convert to real index in items if filtered
+      // To keep actions working on the real array, compute real index
+      const realIndex = items.findIndex(x => x._id === it._id);
+      html += `<tr>
+        <td>${escapeHtml(it.name)}</td>
+        <td>${Number(it.qty)}</td>
+        <td>${Number(it.price).toFixed(2)}</td>
+        <td>
+          <button class="action-btn edit" onclick="editAt(${realIndex})">Edit</button>
+          <button class="action-btn del" onclick="deleteAt(${realIndex})">Delete</button>
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  }
+
+  // escape to prevent accidental HTML injection (safe though local only)
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ---------- modal controls ----------
+  const modal = document.getElementById('modal');
+  const inputName = document.getElementById('name');
+  const inputQty = document.getElementById('qty');
+  const inputPrice = document.getElementById('price');
+  const modalTitle = document.getElementById('modal-title');
+  const modalNote = document.getElementById('modal-note');
+
+  function openModal(mode = 'add', index = -1) {
+    editingIndex = index;
+    if (mode === 'add') {
+      modalTitle.textContent = 'Add Item';
+      modalNote.textContent = '';
+      inputName.value = '';
+      inputQty.value = '';
+      inputPrice.value = '';
+    } else {
+      modalTitle.textContent = 'Edit Item';
+      modalNote.textContent = '';
+      const it = items[index];
+      inputName.value = it.name;
+      inputQty.value = it.qty;
+      inputPrice.value = it.price;
+    }
+    modal.classList.add('show');
+    inputName.focus();
+  }
+
+  function closeModal() {
+    modal.classList.remove('show');
+    editingIndex = -1;
+    modalNote.textContent = '';
+  }
+
+  // close when clicking outside modal box
+  function overlayClick(e) {
+    if (e.target === modal) closeModal();
+  }
+
+  // ESC key to close
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeModal();
+  });
+
+  // ---------- operations ----------
+  function onAddClick() {
+    openModal('add', -1);
+  }
+
+  function onSave() {
+    const name = inputName.value.trim();
+    const qty = Number(inputQty.value);
+    const price = Number(inputPrice.value);
+
+    if (!name) { modalNote.textContent = 'Name is required.'; inputName.focus(); return; }
+    if (!Number.isFinite(qty) || qty < 0) { modalNote.textContent = 'Enter a valid non-negative quantity.'; inputQty.focus(); return; }
+    if (!Number.isFinite(price) || price < 0) { modalNote.textContent = 'Enter a valid non-negative price.'; inputPrice.focus(); return; }
+
+    if (editingIndex === -1) {
+      // create unique id to reliably map filtered lists back to items
+      const newItem = { _id: Date.now() + '-' + Math.random().toString(36).slice(2), name, qty, price };
+      items.push(newItem);
+    } else {
+      items[editingIndex].name = name;
+      items[editingIndex].qty = qty;
+      items[editingIndex].price = price;
+    }
+
+    persist();
+    renderList();
+    closeModal();
+  }
+
+  function editAt(index) {
+    if (index < 0 || index >= items.length) { alert('Invalid item.'); return; }
+    openModal('edit', index);
+  }
+
+  function deleteAt(index) {
+    if (index < 0 || index >= items.length) { alert('Invalid item.'); return; }
+    const ok = confirm(`Delete "${items[index].name}"? This cannot be undone.`);
+    if (!ok) return;
+    items.splice(index, 1);
+    persist();
+    renderList();
+  }
+
+  function onUpdateClick() {
+    if (items.length === 0) { alert('No items to update. Add items first.'); return; }
+    const name = prompt('Enter exact item name to edit:');
+    if (!name) return;
+    const idx = items.findIndex(i => i.name.toLowerCase() === name.trim().toLowerCase());
+    if (idx === -1) { alert('Item not found.'); return; }
+    openModal('edit', idx);
+  }
+
+  function onDeleteClick() {
+    if (items.length === 0) { alert('No items to delete.'); return; }
+    const name = prompt('Enter exact item name to delete:');
+    if (!name) return;
+    const idx = items.findIndex(i => i.name.toLowerCase() === name.trim().toLowerCase());
+    if (idx === -1) { alert('Item not found.'); return; }
+    const ok = confirm(`Delete "${items[idx].name}"?`);
+    if (!ok) return;
+    items.splice(idx, 1);
+    persist();
+    renderList();
+  }
+
+  function onSearchClick() {
+    if (items.length === 0) { alert('No items to search.'); return; }
+    const q = prompt('Search items by name (partial allowed):');
+    if (q === null) return;
+    const query = q.trim().toLowerCase();
+    if (!query) {
+      renderList();
+      return;
+    }
+    const results = items.filter(i => i.name.toLowerCase().includes(query));
+    if (results.length === 0) { alert('No matching items found.'); renderList([]); return; }
+    renderList(results);
+  }
+
+  // initialize
+  renderList();
+</script>
+
+</body>
+</html>
